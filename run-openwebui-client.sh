@@ -1,10 +1,11 @@
 #!/bin/bash
 
 # =============================================================================
-# DeepSeek-OCR OpenWebUI Client Runner
+# DeepSeek-OCR SSH Tunnel Client Runner
 # =============================================================================
-# Script untuk menjalankan OCR client yang connect ke OpenWebUI server
-# Updated: 26 Nov 2025 - Fixed for low memory server (Gracia's request)
+# Script untuk menjalankan OCR client yang connect ke server via SSH tunnel
+# Server: Rocky Linux 192.168.17.7:23333 (via stb37)
+# Updated: 26 Nov 2025 - SSH tunnel configuration
 # =============================================================================
 
 set -e  # Exit on error
@@ -19,29 +20,48 @@ NC='\033[0m' # No Color
 # Banner
 echo -e "${BLUE}"
 echo "════════════════════════════════════════════════════════════"
-echo "  DeepSeek-OCR → OpenWebUI Client"
+echo "  DeepSeek-OCR → Rocky Linux Server (via SSH Tunnel)"
 echo "  Indonesian KTP Extraction"
 echo "════════════════════════════════════════════════════════════"
 echo -e "${NC}"
 
-# Check if token is set
-if [ -z "$OPENWEBUI_TOKEN" ]; then
-    echo -e "${RED}❌ ERROR: OPENWEBUI_TOKEN tidak ditemukan!${NC}"
+# Check if SSH tunnel is active
+echo -e "${YELLOW}🔍 Checking SSH tunnel status...${NC}"
+if ! lsof -i :23333 > /dev/null 2>&1; then
+    echo -e "${RED}❌ ERROR: SSH tunnel tidak active!${NC}"
     echo ""
-    echo -e "${YELLOW}📋 Cara setup:${NC}"
-    echo "   1. Buka: https://openwebui.3ddm.my.id/"
-    echo "   2. Login dengan akun Anda"
-    echo "   3. Settings → Account → API Keys"
-    echo "   4. Create New Secret Key"
-    echo "   5. Copy token tersebut"
+    echo -e "${YELLOW}📋 Cara setup tunnel:${NC}"
+    echo "   1. Buka terminal baru"
+    echo "   2. Run: ssh stb37"
+    echo "   3. Biarkan terminal itu tetap running"
+    echo "   4. Kembali ke terminal ini dan run script lagi"
     echo ""
-    echo -e "${YELLOW}🔧 Set token dengan:${NC}"
-    echo "   export OPENWEBUI_TOKEN=\"sk-xxxxxxxxxxxxxxxx\""
-    echo ""
-    echo -e "${YELLOW}💡 Atau jalankan script dengan:${NC}"
-    echo "   OPENWEBUI_TOKEN=\"sk-xxx\" $0"
+    echo -e "${YELLOW}💡 Atau jalankan di background:${NC}"
+    echo "   ssh -f -N stb37"
     echo ""
     exit 1
+fi
+
+echo -e "${GREEN}✅ SSH tunnel active (localhost:23333)${NC}"
+
+# Test server connectivity
+echo -e "${YELLOW}🔍 Testing server connectivity...${NC}"
+if curl -s --max-time 5 http://localhost:23333/v1/models > /dev/null 2>&1; then
+    echo -e "${GREEN}✅ Server responding${NC}"
+else
+    echo -e "${RED}⚠️  WARNING: Server tidak merespon!${NC}"
+    echo ""
+    echo -e "${YELLOW}📋 Troubleshooting:${NC}"
+    echo "   1. Check server status via: ssh rocky37"
+    echo "   2. Check container: docker ps | grep deepseek"
+    echo "   3. View logs: docker logs deepseek-ocr-server"
+    echo "   4. Restart: docker restart deepseek-ocr-server"
+    echo ""
+    read -p "Continue anyway? (y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
 fi
 
 # Configuration
@@ -49,7 +69,11 @@ PROJECT_DIR="/tmp/ktp-ocr-openwebui"
 SOURCE_FILE="/Users/yericoalexander/Documents/PROJECT-SMARTELCO/deepseek-ocr.rs/examples/007_analyze_ai_deepseek_ocr_server.rs"
 IMAGE_PATH="${1:-/Users/yericoalexander/Pictures/ktp.jpg}"
 
-echo -e "${GREEN}✅ Token found${NC}"
+# Configuration
+PROJECT_DIR="/tmp/ktp-ocr-ssh-tunnel"
+SOURCE_FILE="/Users/yericoalexander/Documents/PROJECT-SMARTELCO/deepseek-ocr.rs/examples/007_analyze_ai_deepseek_ocr_server.rs"
+IMAGE_PATH="${1:-/Users/yericoalexander/Pictures/ktp.jpg}"
+
 echo -e "${BLUE}📁 Project dir: ${PROJECT_DIR}${NC}"
 echo -e "${BLUE}🖼️  Image: ${IMAGE_PATH}${NC}"
 echo ""
@@ -108,8 +132,7 @@ echo ""
 
 cd "$PROJECT_DIR"
 
-# Set environment and run
-export OPENWEBUI_TOKEN="$OPENWEBUI_TOKEN"
+# Run (no token needed for local server)
 cargo run --release
 
 # Success
@@ -117,5 +140,8 @@ echo ""
 echo -e "${GREEN}"
 echo "════════════════════════════════════════════════════════════"
 echo "  ✅ Completed!"
+echo ""
+echo "  💡 Jangan lupa: Keep SSH tunnel running!"
+echo "     Terminal dengan 'ssh stb37' harus tetap active."
 echo "════════════════════════════════════════════════════════════"
 echo -e "${NC}"

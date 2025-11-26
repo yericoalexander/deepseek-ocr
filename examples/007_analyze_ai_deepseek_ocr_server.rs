@@ -7,44 +7,33 @@ use std::error::Error;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // --- KONFIGURASI ---
-    // Server URL - OpenWebUI endpoint untuk chat completion
-    const SERVER_URL: &str = "https://openwebui.3ddm.my.id/v1/chat/completions";
+    // Server URL - DeepSeek-OCR Server via SSH Tunnel
+    // Pastikan sudah connect ke SSH: ssh stb37
+    // Tunnel akan map localhost:23333 -> 192.168.17.7:23333 (Rocky Linux)
+    const SERVER_URL: &str = "http://localhost:23333/v1/chat/completions";
     
     // Path ke gambar KTP di macOS Anda
     const IMAGE_PATH: &str = "/Users/yericoalexander/Pictures/ktp.jpg"; 
     
     // ⚠️ PENTING: Model Selection berdasarkan Available Memory Server
-    // Dari error "500: failed to load language model" + "out of memory"
-    // Solusi: Gunakan model quantized yang lebih ringan
+    // Server Rocky Linux 192.168.17.7 dengan deepseek-ocr-server
     //
     // Pilihan model (dari ringan ke berat):
     // 1. "paddleocr-vl:q4k"      - 2-3GB VRAM (RECOMMENDED untuk server terbatas)
     // 2. "paddleocr-vl:q8"       - 4-5GB VRAM
     // 3. "deepseek-ocr:q4k"      - 4-6GB VRAM
-    // 4. "deepseek-ocr"          - 13GB+ VRAM (Full precision - GAGAL di server Anda)
+    // 4. "deepseek-ocr"          - 13GB+ VRAM (Full precision)
     //
-    // Gunakan paddleocr-vl:q4k karena lebih ringan dan bagus untuk KTP
-    const MODEL_NAME: &str = "paddleocr-vl:q4k"; 
+    // Note: Jika server sudah running model tertentu, gunakan model yang sama
+    const MODEL_NAME: &str = "paddleocr-vl"; 
     
-    // API Token dari environment variable
-    // Set dengan: export OPENWEBUI_TOKEN="your_token_here"
-    let api_token = env::var("OPENWEBUI_TOKEN")
+    // API Token - Untuk deepseek-ocr-server biasanya tidak perlu token
+    // Tapi jika server memerlukan, set via environment variable
+    let api_token = env::var("DEEPSEEK_API_TOKEN")
         .unwrap_or_else(|_| {
-            eprintln!("❌ ERROR: OPENWEBUI_TOKEN tidak ditemukan!");
-            eprintln!("\n📋 Cara setup:");
-            eprintln!("   export OPENWEBUI_TOKEN=\"sk-xxxxxxxxxxxxxxxx\"");
-            eprintln!("\n🔑 Cara mendapatkan token:");
-            eprintln!("   1. Buka: https://openwebui.3ddm.my.id/");
-            eprintln!("   2. Login dengan akun Anda");
-            eprintln!("   3. Settings → Account → API Keys");
-            eprintln!("   4. Create New Secret Key");
-            eprintln!("   5. Copy token tersebut\n");
-            String::new()
+            // Default token dummy jika server tidak require authentication
+            "sk-dummy-token".to_string()
         });
-    
-    if api_token.is_empty() {
-        return Err("❌ API token diperlukan. Set OPENWEBUI_TOKEN environment variable.".into());
-    }
     
     println!("✅ Configuration:");
     println!("   Server  : {}", SERVER_URL);
