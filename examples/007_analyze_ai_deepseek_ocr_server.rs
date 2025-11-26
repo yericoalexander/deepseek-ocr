@@ -25,6 +25,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // 4. "deepseek-ocr"          - 13GB+ VRAM (Full precision)
     //
     // Note: Jika server sudah running model tertentu, gunakan model yang sama
+    // paddleocr-vl terbukti berhasil extract text (dengan XML tags)
     const MODEL_NAME: &str = "paddleocr-vl"; 
     
     // API Token - Untuk deepseek-ocr-server biasanya tidak perlu token
@@ -68,15 +69,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 "role": "user",
                 "content": [
                     {
-                        "type": "text",
-                        // Prompt engineering untuk ekstraksi KTP Indonesia
-                        "text": "<image>\n\nTask: Extract text from Indonesian ID Card (KTP).\n\nOutput format JSON:\n{\n  \"NIK\": \"...\",\n  \"Nama\": \"...\",\n  \"TempatTglLahir\": \"...\",\n  \"JenisKelamin\": \"...\",\n  \"Alamat\": \"...\",\n  \"RTRW\": \"...\",\n  \"KelDesa\": \"...\",\n  \"Kecamatan\": \"...\",\n  \"Agama\": \"...\",\n  \"StatusPerkawinan\": \"...\",\n  \"Pekerjaan\": \"...\",\n  \"Kewarganegaraan\": \"...\"\n}\n\nRules:\n- Extract exactly as shown in image\n- Do not translate to English\n- No markdown formatting (no ```json)\n- Stop after closing brace"
-                    },
-                    {
                         "type": "image_url",
                         "image_url": {
                             "url": data_url
                         }
+                    },
+                    {
+                        "type": "text",
+                        // Prompt sederhana untuk testing
+                        "text": "What text do you see in this image?"
                     }
                 ]
             }
@@ -105,16 +106,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if status.is_success() {
         let response_body: serde_json::Value = res.json().await?;
         
-        // Debug: print full response structure
-        if env::var("DEBUG").is_ok() {
-            println!("\n🔍 DEBUG - Full response:");
-            println!("{}", serde_json::to_string_pretty(&response_body)?);
-        }
+        // ALWAYS print full response for debugging
+        println!("\n🔍 Full Response:");
+        println!("{}", serde_json::to_string_pretty(&response_body)?);
         
         // Ambil content dari berbagai format response yang mungkin
         let content = response_body["choices"][0]["message"]["content"].as_str()
             .or_else(|| response_body["message"]["content"].as_str())
-            .or_else(|| response_body["response"].as_str());
+            .or_else(|| response_body["response"].as_str())
+            .or_else(|| response_body["text"].as_str());
         
         if let Some(content) = content {
             println!("\n✅ HASIL OCR - Indonesian ID Card (KTP)");
