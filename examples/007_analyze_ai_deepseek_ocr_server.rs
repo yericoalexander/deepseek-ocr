@@ -7,71 +7,81 @@ use std::error::Error;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // --- KONFIGURASI ---
-    // Server URL - OpenWebUI biasanya menggunakan endpoint /api/chat atau /ollama/api/chat
-    // Coba beberapa kemungkinan endpoint:
-    const SERVER_URL: &str = "https://openwebui.3ddm.my.id/ollama/api/chat";
-    // Alternatif lain jika gagal:
-    // const SERVER_URL: &str = "https://openwebui.3ddm.my.id/api/chat";
-    // const SERVER_URL: &str = "https://openwebui.3ddm.my.id/v1/chat/completions";
+    // Server URL - OpenWebUI endpoint untuk chat completion
+    const SERVER_URL: &str = "https://openwebui.3ddm.my.id/v1/chat/completions";
     
     // Path ke gambar KTP di macOS Anda
     const IMAGE_PATH: &str = "/Users/yericoalexander/Pictures/ktp.jpg"; 
     
-    // Model yang tersedia di OpenWebUI
-    // Options: "deepseek-ocr", "paddleocr-vl", "dots-ocr", atau model quantized
-    // Untuk KTP/ID Card, gunakan paddleocr-vl atau deepseek-ocr
-    const MODEL_NAME: &str = "deepseek-ocr"; 
+    // ⚠️ PENTING: Model Selection berdasarkan Available Memory Server
+    // Dari error "500: failed to load language model" + "out of memory"
+    // Solusi: Gunakan model quantized yang lebih ringan
+    //
+    // Pilihan model (dari ringan ke berat):
+    // 1. "paddleocr-vl:q4k"      - 2-3GB VRAM (RECOMMENDED untuk server terbatas)
+    // 2. "paddleocr-vl:q8"       - 4-5GB VRAM
+    // 3. "deepseek-ocr:q4k"      - 4-6GB VRAM
+    // 4. "deepseek-ocr"          - 13GB+ VRAM (Full precision - GAGAL di server Anda)
+    //
+    // Gunakan paddleocr-vl:q4k karena lebih ringan dan bagus untuk KTP
+    const MODEL_NAME: &str = "paddleocr-vl:q4k"; 
     
     // API Token dari environment variable
     // Set dengan: export OPENWEBUI_TOKEN="your_token_here"
     let api_token = env::var("OPENWEBUI_TOKEN")
         .unwrap_or_else(|_| {
-            println!("⚠️  OPENWEBUI_TOKEN tidak ditemukan!");
-            println!("Silakan set environment variable dengan:");
-            println!("  export OPENWEBUI_TOKEN=\"your_api_key_here\"");
-            println!("\nUntuk mendapatkan token:");
-            println!("  1. Login ke https://openwebui.3ddm.my.id/");
-            println!("  2. Buka Settings > Account > API Keys");
-            println!("  3. Generate new API key");
+            eprintln!("❌ ERROR: OPENWEBUI_TOKEN tidak ditemukan!");
+            eprintln!("\n📋 Cara setup:");
+            eprintln!("   export OPENWEBUI_TOKEN=\"sk-xxxxxxxxxxxxxxxx\"");
+            eprintln!("\n🔑 Cara mendapatkan token:");
+            eprintln!("   1. Buka: https://openwebui.3ddm.my.id/");
+            eprintln!("   2. Login dengan akun Anda");
+            eprintln!("   3. Settings → Account → API Keys");
+            eprintln!("   4. Create New Secret Key");
+            eprintln!("   5. Copy token tersebut\n");
             String::new()
         });
     
     if api_token.is_empty() {
-        return Err("API token required".into());
+        return Err("❌ API token diperlukan. Set OPENWEBUI_TOKEN environment variable.".into());
     }
+    
+    println!("✅ Configuration:");
+    println!("   Server  : {}", SERVER_URL);
+    println!("   Model   : {} (optimized for low memory)", MODEL_NAME);
+    println!("   Image   : {}", IMAGE_PATH);
+    println!();
     // -------------------
 
-    println!("Membaca gambar dari: {}", IMAGE_PATH);
+    println!("📤 Reading image: {}", IMAGE_PATH);
 
     // 1. Baca file gambar dan ubah ke Base64
-    let image_data = fs::read(IMAGE_PATH)?;
+    let image_data = fs::read(IMAGE_PATH)
+        .map_err(|e| format!("❌ Gagal membaca gambar: {}. Pastikan file ada!", e))?;
+    
+    println!("   Image size: {:.2} KB", image_data.len() as f64 / 1024.0);
+    
     let base64_image = general_purpose::STANDARD.encode(&image_data);
     let data_url = format!("data:image/jpeg;base64,{}", base64_image);
 
-    // 2. Siapkan Payload JSON (Format OpenAI) dengan parameter pengekang
+    // 2. Siapkan Payload JSON (Format OpenAI/OpenWebUI)
     let payload = json!({
         "model": MODEL_NAME,
         
-        // --- PERUBAHAN PENTING DI SINI ---
+        // Parameter optimized untuk OCR extraction (bukan generative text)
+        "temperature": 0.1,        // Rendah = deterministik, tidak kreatif
+        "top_p": 0.1,              // Fokus pada token dengan probability tinggi
+        "frequency_penalty": 0.8,  // Hukuman keras untuk repetisi
+        "max_tokens": 2048,        // Cukup untuk data KTP lengkap
         
-        // 1. Temperature 0.1: Mematikan kreativitas. Model akan memilih kata yang paling mungkin (teks gambar).
-        // Jangan set 0 pas (beberapa backend error), gunakan angka sangat kecil seperti 0.1 atau 0.01
-        "temperature": 0.1, 
-        
-        // 2. Top_p rendah: Membatasi variasi pemilihan kata.
-        "top_p": 0.1,
-
-        // 3. Frequency Penalty: Memberi hukuman jika model mengulang-ulang kalimat (looping).
-        "frequency_penalty": 0.5, 
-
         "messages": [
             {
                 "role": "user",
                 "content": [
                     {
                         "type": "text",
-                        // Prompt khusus untuk ekstraksi KTP Indonesia
-                        "text": "<image>\nExtract all text from this Indonesian ID card (KTP). Output as JSON with fields: NIK, Nama, Tempat/Tgl Lahir, Jenis Kelamin, Alamat, RT/RW, Kel/Desa, Kecamatan, Agama, Status Perkawinan, Pekerjaan, Kewarganegaraan. Do not translate. Do not add markdown formatting."
+                        // Prompt engineering untuk ekstraksi KTP Indonesia
+                        "text": "<image>\n\nTask: Extract text from Indonesian ID Card (KTP).\n\nOutput format JSON:\n{\n  \"NIK\": \"...\",\n  \"Nama\": \"...\",\n  \"TempatTglLahir\": \"...\",\n  \"JenisKelamin\": \"...\",\n  \"Alamat\": \"...\",\n  \"RTRW\": \"...\",\n  \"KelDesa\": \"...\",\n  \"Kecamatan\": \"...\",\n  \"Agama\": \"...\",\n  \"StatusPerkawinan\": \"...\",\n  \"Pekerjaan\": \"...\",\n  \"Kewarganegaraan\": \"...\"\n}\n\nRules:\n- Extract exactly as shown in image\n- Do not translate to English\n- No markdown formatting (no ```json)\n- Stop after closing brace"
                     },
                     {
                         "type": "image_url",
@@ -81,15 +91,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                 ]
             }
-        ],
-        // Max tokens tetap ada sebagai safety net, tapi dengan setting di atas
-        // model seharusnya berhenti jauh sebelum mencapai angka ini.
-        "max_tokens": 1000
+        ]
     });
-    println!("Mengirim request ke server Linux: {} ...", SERVER_URL);
+    
+    println!("📡 Sending request to OpenWebUI server...");
+    println!("   Using model: {}", MODEL_NAME);
 
-    // 3. Kirim Request HTTP POST
-    let client = reqwest::Client::new();
+    // 3. Kirim Request HTTP POST dengan timeout yang cukup
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120)) // 2 menit timeout untuk processing
+        .build()?;
+        
     let res = client.post(SERVER_URL)
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", api_token))
@@ -97,21 +109,73 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .send()
         .await?;
 
-    // 4. Proses Response
-    if res.status().is_success() {
+    // 4. Proses Response dengan error handling detail
+    let status = res.status();
+    println!("📥 Response status: {}", status);
+    
+    if status.is_success() {
         let response_body: serde_json::Value = res.json().await?;
         
-        // Ambil isi text dari struktur JSON OpenAI
-        if let Some(content) = response_body["choices"][0]["message"]["content"].as_str() {
-            println!("\n--- HASIL OCR ---");
+        // Debug: print full response structure
+        if env::var("DEBUG").is_ok() {
+            println!("\n🔍 DEBUG - Full response:");
+            println!("{}", serde_json::to_string_pretty(&response_body)?);
+        }
+        
+        // Ambil content dari berbagai format response yang mungkin
+        let content = response_body["choices"][0]["message"]["content"].as_str()
+            .or_else(|| response_body["message"]["content"].as_str())
+            .or_else(|| response_body["response"].as_str());
+        
+        if let Some(content) = content {
+            println!("\n✅ HASIL OCR - Indonesian ID Card (KTP)");
+            println!("═══════════════════════════════════════════");
             println!("{}", content);
+            println!("═══════════════════════════════════════════\n");
         } else {
-            println!("Format response tidak sesuai: {:?}", response_body);
+            println!("⚠️  Response tidak mengandung content yang diharapkan");
+            println!("Response structure: {:?}", response_body);
         }
     } else {
-        println!("Error dari server: Status: {}", res.status());
         let error_text = res.text().await?;
-        println!("Detail: {}", error_text);
+        eprintln!("\n❌ ERROR dari server OpenWebUI");
+        eprintln!("═══════════════════════════════════════════");
+        eprintln!("Status Code: {}", status);
+        eprintln!("Detail: {}", error_text);
+        eprintln!("═══════════════════════════════════════════");
+        
+        // Diagnostic hints berdasarkan error code
+        match status.as_u16() {
+            401 => {
+                eprintln!("\n💡 Solusi:");
+                eprintln!("   Token tidak valid atau expired.");
+                eprintln!("   Buat token baru di: https://openwebui.3ddm.my.id/");
+                eprintln!("   Settings → Account → API Keys → Create New");
+            },
+            500 => {
+                if error_text.contains("memory") || error_text.contains("load") {
+                    eprintln!("\n💡 Solusi:");
+                    eprintln!("   Server kehabisan memory saat load model.");
+                    eprintln!("   Model '{}' terlalu besar.", MODEL_NAME);
+                    eprintln!("\n   Saran:");
+                    eprintln!("   1. Pastikan model sudah ter-install di server:");
+                    eprintln!("      ssh rocky@server");
+                    eprintln!("      docker exec -it open-webui ollama list");
+                    eprintln!("\n   2. Jika belum ada, pull model quantized:");
+                    eprintln!("      docker exec -it open-webui ollama pull paddleocr-vl:q4k");
+                    eprintln!("\n   3. Monitor memory dengan nvtop atau htop");
+                    eprintln!("      Pastikan VRAM/RAM cukup (minimal 4GB free)");
+                }
+            },
+            404 => {
+                eprintln!("\n💡 Solusi:");
+                eprintln!("   Model '{}' tidak ditemukan di server.", MODEL_NAME);
+                eprintln!("   Jalankan di server: ollama pull {}", MODEL_NAME);
+            },
+            _ => {}
+        }
+        
+        return Err(format!("Server error: {}", status).into());
     }
 
     Ok(())
